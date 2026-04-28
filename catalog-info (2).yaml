@@ -1,0 +1,442 @@
+# =============================================================================
+# Backstage Software Catalog — полный пример связанных сущностей
+# Сценарий: платформа электронной коммерции "ShopFlow"
+#
+# Граф связей (стрелка → = "ссылается на"):
+#
+#   Domain: ecommerce
+#     └── System: order-management
+#           ├── Component: order-service      (service)
+#           │     ├── providesApis  → API: order-api
+#           │     ├── dependsOn     → Resource: orders-db
+#           │     └── consumesApis  → API: payment-api
+#           ├── Component: order-frontend     (website)
+#           │     └── consumesApis  → API: order-api
+#           └── Component: notification-svc   (service)
+#                 └── dependsOn     → Resource: events-queue
+#     └── System: payment-processing
+#           ├── Component: payment-service    (service)
+#           │     └── providesApis  → API: payment-api
+#           └── Resource: payment-db          (database)
+#
+#   Group: ecommerce-team   (owns order-* компоненты и API)
+#     ├── parent → Group: engineering
+#     └── members → User: alice, User: bob
+#
+#   Group: platform-team    (owns ресурсы инфраструктуры)
+#     ├── parent → Group: engineering
+#     └── members → User: carol
+#
+#   Group: engineering      (корневая группа)
+#
+# =============================================================================
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DOMAIN — верхний уровень иерархии, объединяет системы по бизнес-домену
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: backstage.io/v1alpha1
+kind: Domain
+metadata:
+  name: ecommerce
+  title: E-Commerce Domain
+  description: >
+    Всё, что связано с продажами: управление заказами, платежи,
+    уведомления покупателей.
+  tags:
+    - ecommerce
+    - core-business
+spec:
+  owner: group:default/ecommerce-team   # ← Group
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# SYSTEM — логическая группа компонентов, решающих одну задачу
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: order-management
+  title: Order Management System
+  description: Приём и обработка заказов, включая фронтенд и уведомления.
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+  tags:
+    - orders
+spec:
+  owner: group:default/ecommerce-team   # ← Group
+  domain: ecommerce                     # ← Domain
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: payment-processing
+  title: Payment Processing System
+  description: Платёжный шлюз, обработка транзакций и хранение платёжных данных.
+  tags:
+    - payments
+    - pci-dss
+spec:
+  owner: group:default/ecommerce-team   # ← Group
+  domain: ecommerce                     # ← Domain
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENT — конкретный программный артефакт (сервис, сайт, библиотека)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: order-service
+  title: Order Service
+  description: >
+    Бэкенд-сервис управления заказами. Принимает запросы от фронтенда,
+    сохраняет в БД и отправляет платёжные запросы.
+  annotations:
+    github.com/project-slug: shopflow/order-service
+    backstage.io/techdocs-ref: dir:.
+    pagerduty.com/integration-key: abc123xyz
+  tags:
+    - kotlin
+    - spring-boot
+    - grpc
+  links:
+    - url: https://grafana.shopflow.internal/d/order-service
+      title: Grafana Dashboard
+      icon: dashboard
+    - url: https://sentry.io/shopflow/order-service
+      title: Sentry Errors
+      icon: alert
+spec:
+  type: service
+  lifecycle: production
+  owner: group:default/ecommerce-team   # ← Group
+  system: order-management             # ← System
+  providesApis:
+    - order-api                         # ← API
+  consumesApis:
+    - payment-api                       # ← API (из другого system)
+  dependsOn:
+    - resource:default/orders-db        # ← Resource
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: order-frontend
+  title: Order Frontend
+  description: React SPA — личный кабинет покупателя для управления заказами.
+  annotations:
+    github.com/project-slug: shopflow/order-frontend
+  tags:
+    - react
+    - typescript
+spec:
+  type: website
+  lifecycle: production
+  owner: group:default/ecommerce-team   # ← Group
+  system: order-management             # ← System
+  consumesApis:
+    - order-api                         # ← API
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: notification-svc
+  title: Notification Service
+  description: >
+    Микросервис рассылки email/SMS/push-уведомлений. Подписывается на события
+    из очереди сообщений и доставляет их пользователям.
+  annotations:
+    github.com/project-slug: shopflow/notification-svc
+  tags:
+    - python
+    - kafka
+spec:
+  type: service
+  lifecycle: production
+  owner: group:default/ecommerce-team   # ← Group
+  system: order-management             # ← System
+  dependsOn:
+    - resource:default/events-queue     # ← Resource
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: payment-service
+  title: Payment Service
+  description: >
+    Сервис обработки платежей. Интегрируется со Stripe и Adyen,
+    хранит транзакции в изолированной PCI-DSS БД.
+  annotations:
+    github.com/project-slug: shopflow/payment-service
+  tags:
+    - go
+    - grpc
+    - pci-dss
+spec:
+  type: service
+  lifecycle: production
+  owner: group:default/ecommerce-team   # ← Group
+  system: payment-processing           # ← System
+  providesApis:
+    - payment-api                       # ← API
+  dependsOn:
+    - resource:default/payment-db       # ← Resource
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# API — описание интерфейса, который компонент предоставляет или потребляет
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: order-api
+  title: Order API
+  description: REST API управления заказами. Используется фронтендом и внешними партнёрами.
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+  tags:
+    - rest
+    - openapi
+  links:
+    - url: https://api.shopflow.internal/orders/swagger
+      title: Swagger UI
+      icon: docs
+spec:
+  type: openapi
+  lifecycle: production
+  owner: group:default/ecommerce-team   # ← Group
+  system: order-management             # ← System
+  definition: |
+    openapi: "3.0.3"
+    info:
+      title: Order API
+      version: "2.1.0"
+    paths:
+      /orders:
+        get:
+          summary: Список заказов текущего пользователя
+          responses:
+            "200":
+              description: OK
+        post:
+          summary: Создать новый заказ
+          responses:
+            "201":
+              description: Created
+      /orders/{id}:
+        get:
+          summary: Получить заказ по ID
+          parameters:
+            - name: id
+              in: path
+              required: true
+              schema:
+                type: string
+          responses:
+            "200":
+              description: OK
+            "404":
+              description: Not Found
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: payment-api
+  title: Payment API
+  description: gRPC API проведения и возврата платежей. Потребляется order-service.
+  tags:
+    - grpc
+    - protobuf
+    - pci-dss
+spec:
+  type: grpc
+  lifecycle: production
+  owner: group:default/ecommerce-team   # ← Group
+  system: payment-processing           # ← System
+  definition: |
+    syntax = "proto3";
+    package payment.v1;
+
+    service PaymentService {
+      rpc Charge(ChargeRequest) returns (ChargeResponse);
+      rpc Refund(RefundRequest)  returns (RefundResponse);
+    }
+
+    message ChargeRequest {
+      string order_id    = 1;
+      int64  amount_cents = 2;
+      string currency    = 3;
+      string token       = 4;
+    }
+
+    message ChargeResponse {
+      string transaction_id = 1;
+      string status         = 2;
+    }
+
+    message RefundRequest  { string transaction_id = 1; }
+    message RefundResponse { string status = 1; }
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# RESOURCE — внешняя инфраструктура: БД, очереди, хранилища и т.п.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: orders-db
+  title: Orders Database
+  description: PostgreSQL-кластер для хранения заказов и статусов доставки.
+  annotations:
+    backstage.io/managed-by-origin-location: url:https://github.com/shopflow/infra
+  tags:
+    - postgresql
+    - rds
+spec:
+  type: database
+  owner: group:default/platform-team    # ← Group (инфра принадлежит platform-team)
+  system: order-management             # ← System
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: events-queue
+  title: Events Kafka Topic
+  description: Kafka-топик order-events для асинхронной передачи событий в notification-svc.
+  tags:
+    - kafka
+    - messaging
+spec:
+  type: messaging-queue
+  owner: group:default/platform-team    # ← Group
+  system: order-management             # ← System
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: payment-db
+  title: Payment Database
+  description: Изолированная PostgreSQL БД платёжных транзакций (зона PCI-DSS).
+  tags:
+    - postgresql
+    - rds
+    - pci-dss
+spec:
+  type: database
+  owner: group:default/platform-team    # ← Group
+  system: payment-processing           # ← System
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# GROUP — команды и оргструктура
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: engineering
+  title: Engineering
+  description: Корневой департамент разработки. Все технические команды входят сюда.
+spec:
+  type: department
+  profile:
+    displayName: Engineering
+    email: engineering@shopflow.io
+  children:                             # ← дочерние Group
+    - ecommerce-team
+    - platform-team
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: ecommerce-team
+  title: E-Commerce Team
+  description: Отвечает за разработку сервисов заказов и платежей.
+  links:
+    - url: https://shopflow.slack.com/channels/ecommerce
+      title: Slack #ecommerce
+spec:
+  type: team
+  profile:
+    displayName: E-Commerce Team
+    email: ecommerce@shopflow.io
+    picture: https://avatars.shopflow.io/ecommerce-team.png
+  parent: engineering                   # ← родительская Group
+  members:                              # ← User
+    - alice
+    - bob
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: platform-team
+  title: Platform Team
+  description: Поддерживает инфраструктуру, БД, Kafka и деплой-пайплайны.
+spec:
+  type: team
+  profile:
+    displayName: Platform Team
+    email: platform@shopflow.io
+  parent: engineering                   # ← родительская Group
+  members:                              # ← User
+    - carol
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# USER — конкретные люди, входящие в группы
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: alice
+  title: Alice Ivanova
+  description: Senior Backend Engineer, tech-lead команды e-commerce.
+  annotations:
+    github.com/user-login: alice-ivanova
+spec:
+  profile:
+    displayName: Alice Ivanova
+    email: alice@shopflow.io
+    picture: https://avatars.shopflow.io/alice.png
+  memberOf:
+    - ecommerce-team                    # ← Group
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: bob
+  title: Bob Petrov
+  description: Frontend Engineer, отвечает за order-frontend.
+  annotations:
+    github.com/user-login: bob-petrov
+spec:
+  profile:
+    displayName: Bob Petrov
+    email: bob@shopflow.io
+  memberOf:
+    - ecommerce-team                    # ← Group
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: carol
+  title: Carol Sidorova
+  description: Platform Engineer, управляет БД и Kafka-кластером.
+  annotations:
+    github.com/user-login: carol-sidorova
+spec:
+  profile:
+    displayName: Carol Sidorova
+    email: carol@shopflow.io
+  memberOf:
+    - platform-team                     # ← Group
